@@ -1,0 +1,169 @@
+# 01_header.py
+import numpy as np
+import pandas as pd
+import time
+from scipy.integrate import ode, solve_ivp
+from numba import jit 
+
+# 02_MyNumba.py
+from numba import types
+from numba.typed import Dict
+
+def MakeDictArray():
+    d=Dict.empty(
+    key_type=types.unicode_type,
+    value_type=types.float64[:],)
+    return d
+
+def MakeDictFloat():
+    d=Dict.empty(
+    key_type=types.unicode_type,
+    value_type=types.float64,)
+    return d
+
+# 03_vgprops.py
+@jit(nopython=True)
+def thetaFun(psi,pars):
+    Se=(1+(psi*-pars['alpha'])**pars['n'])**(-pars['m'])
+    Se[psi>0.]=1.0
+    return pars['thetaR']+(pars['thetaS']-pars['thetaR'])*Se
+
+@jit(nopython=True)
+def CFun(psi,pars):
+    Se=(1+(psi*-pars['alpha'])**pars['n'])**(-pars['m'])
+    Se[psi>0.]=1.0
+    dSedh=pars['alpha']*pars['m']/(1-pars['m'])*Se**(1/pars['m'])*(1-Se**(1/pars['m']))**pars['m']
+    theta=pars['thetaR']+(pars['thetaS']-pars['thetaR'])*Se
+    return theta/pars['thetaS']*pars['Ss']+(pars['thetaS']-pars['thetaR'])*dSedh
+    #return Se*pars['Ss']+(pars['thetaS']-pars['thetaR'])*dSedh
+
+@jit(nopython=True)
+def KFun(psi,pars):
+    Se=(1+(psi*-pars['alpha'])**pars['n'])**(-pars['m'])
+    Se[psi>0.]=1.0
+    return pars['Ks']*Se**pars['neta']*(1-(1-Se**(1/pars['m']))**pars['m'])**2
+
+# 04_Cinv_AN.py
+@jit(nopython=True)
+def CinvFun(psi,psi_n,pars):
+    Cinv=1/CFun(psi,pars)
+    return Cinv
+
+# 05_BC_t1t1.py
+@jit(nopython=True)
+def BoundaryFluxes(BC_T,BC_B,pars,dz,psiTn,psiBn):
+    # Inputs:
+    #  BC_T = specified flux at surface or specified pressure head at surface;
+    #  BC_B = specified flux at base or specified pressure head at base;
+    #  pars = soil hydraulic properties
+    # psiTn = pressure head at node 0 (uppermost node)
+    # psiBn = pressure head at node -1 (lowermost node)
+
+    # Upper BC: Type 1 specified pressure head
+    psiT=BC_T
+    Kin=(KFun(np.array([psiT]),pars)+KFun(np.array([psiTn]),pars))/2.
+    qT=-Kin[0]*((psiTn-psiT)/dz-1.)
+
+    # Lower BC: Type 1 specified pressure head
+    psiB=BC_B
+    Kout=(KFun(np.array([psiBn]),pars)+KFun(np.array([psiB]),pars))/2.
+    qB=-Kout[0]*((psiB-psiBn)/dz-1.)
+
+    return qT,qB
+
+# 06_richardsFlux.py
+# Functions called by the ODE solver:
+def odefun_blockcentered(t,DV,pars,n,BC_T,BC_B,dz,psi_n):
+    return odefuncall(t,DV,pars,n,BC_T,BC_B,dz,psi_n)
+
+@jit(nopython=True)
+def odefuncall(t,DV,pars,n,BC_T,BC_B,dz,psi_n):
+
+    # In this function, we use a block centered grid approch, where the finite difference
+    # solution is defined in terms of differences in fluxes. 
+
+    # Unpack the dependent variable:
+    QT=DV[0]
+    QB=DV[-1]
+    psi=DV[1:-1]
+    psi_n=psi_n[1:-1]
+
+    #qT=np.interp(t,tT,qT)
+    q=np.zeros(n+1)
+    K=np.zeros(n+1)
+    
+    K=KFun(psi,pars)
+    Kmid=(K[1:]+K[:-1])/2.
+    
+    # Boundary fluxes:
+    qT,qB=BoundaryFluxes(BC_T,BC_B,pars,dz,psi[0],psi[-1])
+    q[0]=qT
+    q[-1]=qB
+
+    # Internal nodes
+    q[1:-1]=-Kmid*((psi[1:]-psi[:-1])/dz-1)
+
+    # Continuity
+    Cinv=CinvFun(psi,psi_n,pars)
+    dpsidt=-Cinv*(q[1:]-q[:-1])/dz
+
+#    # Change in cumulative fluxes:
+#    dQTdt=qT
+#    dQBdt=qB
+
+    # Pack up dependent variable:
+    dDVdt=np.hstack((np.array([qT])*1000.,dpsidt,np.array([qB])*1000.))
+
+    return dDVdt
+
+
+# 08_solve_ode_RF_BDF.py
+def run_RE(dt,t,dz,zN,n,psi0,BC_T,BC_B,parsIN):
+    # 4. scipy function "ode", with the jacobian, solving one step at a time:
+    
+    pars=MakeDictFloat()
+    for k in parsIN: pars[k]=parsIN[k]
+
+    DV=np.zeros((len(t),n+2))
+    DV[0,0]=0.       # Cumulative inflow
+    DV[0,-1]=0.      # Cumulative outflow
+    DV[0,1:-1]=psi0  # Matric potential
+
+    r = ode(odefun_blockcentered)
+    #r.set_integrator('vode',method='BDF',uband=1,lband=1,nsteps=10000)
+    #r.set_integrator('vode',method='BDF',uband=1,lband=1,nsteps=10000,rtol=1e-5,atol=1e-5)
+    r.set_integrator('vode',method='BDF',uband=1,lband=1,nsteps=10000,rtol=1e-6,atol=1e-6)
+    
+    tic=time.time()
+    for i,ti in enumerate(t[:-1]):
+        r.set_initial_value(DV[i,:], 0)
+
+        params=(pars,n,BC_T[i],BC_B[i],dz,DV[i,:])
+        #r.set_jac_params(*params)
+        r.set_f_params(*params)
+        r.integrate(dt)
+        DV[i+1,:]=r.y
+
+    runtime=time.time()-tic
+    print('ode, with jac runtime = %.2f seconds'%(runtime))
+
+    # Unpack output:
+    QT=DV[:,0]
+    QB=DV[:,-1]
+    psi=DV[:,1:-1]
+    qT=np.hstack([0,np.diff(QT)])/dt
+    qB=np.hstack([0,np.diff(QB)])/dt
+
+    # Water balance terms
+    theta=thetaFun(psi.reshape(-1),pars)
+    theta=np.reshape(theta,psi.shape)
+    S=np.sum(theta*dz,1)
+
+    # Pack output into a dataframe:
+    WB=pd.DataFrame(index=t)
+    WB['S']=S
+    WB['QIN']=qT/1000.
+    WB['QOUT']=qB/1000.
+
+    return psi,WB,runtime
+
