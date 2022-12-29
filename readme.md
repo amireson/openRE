@@ -16,3 +16,5 @@ There are four scenarios modeled in this repo, all of which are described in the
 4. Infiltration problem: generates Figures 6 and 7
 
 All models can be run using the Makefiles in the subfolders. In each case, it is necessary to first run each model, within the subfolders, and then in the folder "plot_result" there is a Makefile that will produce the figures from the paper
+
+We also include a MATLAB implementation of openRE that solves the Infiltration problem in the folder `infiltrationproblem/modelbenchmarks/matlab`
