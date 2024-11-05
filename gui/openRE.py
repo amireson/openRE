@@ -1,5 +1,6 @@
 # %load openRE.py
 # %load openRE.py
+# %load openRE.py
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
@@ -103,16 +104,16 @@ def runRE(RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_ini,lowerBC,IC):
     elif lowerBC=='ZF':    
         psi,WB,runtime=run_RE_ZF(dt,t,dz,zN,n,psi0,BC_T,BC_B,pars)
         
-    return t,z,psi
+    return t,z,psi,WB
 
 optionsLBC=[{'label': 'Free drainage', 'value': 'FD'},
          {'label': 'Zero flux', 'value': 'ZF'},
          {'label': 'Fixed psi', 'value': 'FP'}]
-defaultvalueLBC='FD'
+defaultvalueLBC='FP'
 
 optionsIC=[{'label': 'Fixed psi', 'value': 'FP'},
          {'label': 'Hydrostatic', 'value': 'HS'}]
-defaultvalueIC='FP'
+defaultvalueIC='HS'
 
 app = dash.Dash(__name__)
 
@@ -238,7 +239,7 @@ app.layout = html.Div([
     dcc.Input(
         id='Ipulses', 
         type='text', 
-        value='0.1, 0.1', 
+        value='0.05, 0.05', 
         style={'width': '150px'}
     ),
     html.Label(" Infiltration pulses (m/d): "),
@@ -287,7 +288,7 @@ app.layout = html.Div([
     dcc.Input(
         id='psi_ini', 
         type='text', 
-        value='-5', 
+        value='0.', 
         style={'width': '75px'}
     ),
     html.Label(" Lower/initial matric potential (m): "),
@@ -368,8 +369,10 @@ def update_graph2(n_clicks,RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_i
     global pars
     if n_clicks > 0:
         # Generate random data for the second graph
-        t,z,psi=runRE(RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_ini,lowerBC,IC)
+        t,z,psi,WB=runRE(RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_ini,lowerBC,IC)
 
+        dt=float(TimeStep)
+        
         # Create the figure for the second graph
         fig = make_subplots(rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=("Depth profile", "Time series"))
         # fig = go.Figure()
@@ -377,8 +380,13 @@ def update_graph2(n_clicks,RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_i
             fig.add_trace(go.Scatter(x=psi[i,:], y=z, mode='lines', line=dict(color='blue')),row=1,col=1)
             fig.add_trace(go.Scatter(x=psi[i,:]+float(SoilDepth)-z, y=z, mode='lines', line=dict(color='red')),row=1,col=1)
 
-        for i in range(len(z)):
-            fig.add_trace(go.Scatter(x=t, y=psi[:,i], mode='lines'),row=1,col=2)
+        fig.add_trace(go.Scatter(x=WB.index, y=WB['S']-WB['S'].iloc[0], mode='lines'),row=1,col=2)
+        fig.add_trace(go.Scatter(x=WB.index, y=WB['QIN'].cumsum()*dt-WB['QOUT'].cumsum()*dt, mode='markers'),row=1,col=2)
+        fig.add_trace(go.Scatter(x=WB.index[1:], y=WB['QIN'].iloc[1:], mode='lines'),row=1,col=2)
+        fig.add_trace(go.Scatter(x=WB.index[1:], y=WB['QOUT'].iloc[1:], mode='lines'),row=1,col=2)
+        
+        # for i in range(len(z)):
+        #     fig.add_trace(go.Scatter(x=t, y=psi[:,i], mode='lines'),row=1,col=2)
             
         fig.update_layout(xaxis_title='X', yaxis_title='Y', 
                             width=None,
@@ -390,7 +398,7 @@ def update_graph2(n_clicks,RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_i
         fig.update_xaxes(title_text='psi (m)', row=1, col=1)
         fig.update_yaxes(title_text='depth (m)', row=1, col=1)
         fig.update_xaxes(title_text='time (d)', row=1, col=2)
-        fig.update_yaxes(title_text='psi (m)', row=1, col=2)
+        fig.update_yaxes(title_text='Water balance', row=1, col=2)
         
         
         return fig, {'display': 'block'}  # Show the graph
