@@ -1,7 +1,5 @@
-# %load openRE.py
-# %load openRE.py
-# %load openRE.py
 import dash
+import dash_bootstrap_components as dbc
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 import plotly.graph_objs as go
@@ -9,317 +7,111 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 
+# Import model libraries:
 from Richards_FD import run_RE as run_RE_FD
 from Richards_FP import run_RE as run_RE_FP
 from Richards_ZF import run_RE as run_RE_ZF
 
-def HydProps(psi_min,psi_max,thetaR, thetaS,alpha,n,KS):
-    global pars
-    psi=np.linspace(psi_min,psi_max)
-    pars={}
-    pars['thetaR']=thetaR
-    pars['thetaS']=thetaS
-    pars['alpha']=alpha
-    pars['n']=n
-    pars['m']=1-1/n
-    pars['Ks']=KS
-    pars['neta']=0.5
-    pars['Ss']=1e-6
+from myFunctions import HydProps
+from myFunctions import thetaFun
+from myFunctions import CFun
+from myFunctions import KFun
+from myFunctions import runRE
 
-    theta=thetaFun(psi,pars)
-    C=CFun(psi,pars)
-    K=KFun(psi,pars)
+# Options and defaults:
+optionsLBC = [
+    {'label': 'Free drainage', 'value': 'FD'},
+    {'label': 'Zero flux', 'value': 'ZF'},
+    {'label': 'Fixed psi', 'value': 'FP'}
+]
+defaultvalueLBC = 'FP'
 
-    return psi,theta,C,K
+optionsIC = [
+    {'label': 'Fixed psi', 'value': 'FP'},
+    {'label': 'Hydrostatic', 'value': 'HS'}
+]
+defaultvalueIC = 'HS'
 
-def thetaFun(psi,pars):
-    Se=(1+(psi*-pars['alpha'])**pars['n'])**(-pars['m'])
-    Se[psi>0.]=1.0
-    return pars['thetaR']+(pars['thetaS']-pars['thetaR'])*Se
-
-def CFun(psi,pars):
-    Se=(1+(psi*-pars['alpha'])**pars['n'])**(-pars['m'])
-    Se[psi>0.]=1.0
-    dSedh=pars['alpha']*pars['m']/(1-pars['m'])*Se**(1/pars['m'])*(1-Se**(1/pars['m']))**pars['m']
-    return Se*pars['Ss']+(pars['thetaS']-pars['thetaR'])*dSedh
-
-def KFun(psi,pars):
-    Se=(1+(psi*-pars['alpha'])**pars['n'])**(-pars['m'])
-    Se[psi>0.]=1.0
-    return pars['Ks']*Se**pars['neta']*(1-(1-Se**(1/pars['m']))**pars['m'])**2
-
-def runRE(RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_ini,lowerBC,IC):
-    
-    global pars
-    
-    # Time grid:
-    tN=float(RunTime)
-
-    # Spatial grid:
-    dz=float(SpaceStep)
-    zN=float(SoilDepth)
-    z=np.arange(dz/2,zN,dz)
-    n=len(z)
-    # z=np.hstack([0,z,zN])
-    #z=z[-1]-z
-
-    # Initial condition:
-    if IC=='HS':
-        psi0=z-zN
-    elif IC=='FP':
-        psi0=np.zeros(n)+float(psi_ini)
-    else:
-        print('error')
-
-    
-    
-    psiB=float(psi_ini)
-    
-    dt=float(TimeStep)
-    t=np.arange(0,tN+dt,dt)
-    nt=len(t)
-
-    # Boundary conditions:
-    tI=[float(i) for i in tI.split(',')]
-    Ipulses=[float(i) for i in Ipulses.split(',')]
-
-    I=np.zeros(len(t))
-    c=0
-
-    for ti in range(len(t)):
-        if t[ti]>=tI[c+1]:
-            c+=1
-        I[ti]=Ipulses[c]
-    
-    
-    # I=(0.5-np.cos(t*2*np.pi/365)/2)*(maxInf-minInf)+minInf
-    
-    BC_T=I+np.zeros(nt)
-    BC_B=psiB+np.zeros(nt)
-    
-    if lowerBC=='FD':
-        psi,WB,runtime=run_RE_FD(dt,t,dz,zN,n,psi0,BC_T,BC_B,pars)
-    elif lowerBC=='FP':
-        psi,WB,runtime=run_RE_FP(dt,t,dz,zN,n,psi0,BC_T,BC_B,pars)
-    elif lowerBC=='ZF':    
-        psi,WB,runtime=run_RE_ZF(dt,t,dz,zN,n,psi0,BC_T,BC_B,pars)
-        
-    return t,z,psi,WB
-
-optionsLBC=[{'label': 'Free drainage', 'value': 'FD'},
-         {'label': 'Zero flux', 'value': 'ZF'},
-         {'label': 'Fixed psi', 'value': 'FP'}]
-defaultvalueLBC='FP'
-
-optionsIC=[{'label': 'Fixed psi', 'value': 'FP'},
-         {'label': 'Hydrostatic', 'value': 'HS'}]
-defaultvalueIC='HS'
-
-app = dash.Dash(__name__)
-
+# Dash app:
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.title = "open RE"
 
-app.layout = html.Div([
+input_style = {"width": "100px"}
+label_style = {"marginRight": "10px"}
 
-    html.Header("Welcome to open RE - a simple Richard's Equation Solver", style={'textAlign': 'center', 'fontSize': '26px', 'padding': '10px'}),
-    
-    html.Div([
-        html.P("Soil hydraulic properties"),
-    ],style={'textAlign': 'left', 'fontSize': '22px', 'padding': '10px'}),
-    
-    html.Div([
-        
-    html.Div([
-        
-    # Text boxes for soil hydraulic properties
-    dcc.Input(
-        id='psi_min', 
-        type='text', 
-        value='-10',
-        style={'width': '75px'}
-    ),
-    html.Label(" psi_min (m): "),
-    html.Br(),
-    dcc.Input(
-        id='psi_max', 
-        type='text', 
-        value='0.',
-        style={'width': '75px'}
-    ),
-    html.Label(" psi_max (m): "),
 
-    html.Br(),
+def make_input_row(label, id_, default):
+    label=dcc.Markdown(label, mathjax=True)
+    return dbc.Row([
+        dbc.Col(dbc.Input(id=id_, type="text", value=default, style=input_style), width="auto"),
+        dbc.Col(dbc.Label(label, html_for=id_, className="col-form-label"), width="auto")
+    ], className="mb-2", align="center")
 
-    dcc.Input(
-        id='thetaR', 
-        type='text', 
-        value='0.1',
-        style={'width': '75px'}
-    ),
-    html.Label(" theta_R: "),
-    html.Br(),
-    dcc.Input(
-        id='thetaS', 
-        type='text', 
-        value='0.4', 
-        style={'width': '75px'}
-    ),
-    html.Label(" theta_S: "),
-    html.Br(),
-    dcc.Input(
-        id='alpha', 
-        type='text', 
-        value='0.5', 
-        style={'width': '75px'}
-    ),
-    html.Label(" alpha (1/m): "),
-    html.Br(),
-    dcc.Input(
-        id='n', 
-        type='text', 
-        value='1.8', 
-        style={'width': '75px'}
-    ),
-    html.Label(" n: "),
-    html.Br(),
-    dcc.Input(
-        id='KS', 
-        type='text', 
-        value='0.2', 
-        style={'width': '75px'}
-    ),
-    html.Label(" K_S (m/d): "),
-    html.Br(),
-    html.Br(),
-    html.Button('Update Plot', id='update-button', n_clicks=0),
-    html.Br(),
-    ], style={'width': '18%', 'display': 'inline-block', 'padding': '10px'}),
 
-    html.Div([
-    # Plot hydraulic properties
-    
-    dcc.Graph(id='hyd-plot'),
+app.layout = dbc.Container([
+    html.H1("Welcome to open RE - a simple Richard's Equation Solver", className="text-primary my-4"),
 
-    ], style={'width': '78%', 'display': 'inline-block', 'padding': '10px'}),
-    ], style={'display': 'flex', 'justifyContent': 'center'}),
+    html.H4("Soil hydraulic properties"),
 
-    html.Div([
-        html.P("Run openRE"),
-    ],style={'textAlign': 'left', 'fontSize': '22px', 'padding': '10px'}),
-    
-    html.Div([
+    dbc.Row([
+        dbc.Col([
+            make_input_row("$\\psi_{min}$ (m):", "psi_min", "-10"),
+            make_input_row("$\\psi_{max}$ (m):", "psi_max", "0."),
+            make_input_row("$\\theta_R$ (-):", "thetaR", "0.1"),
+            make_input_row("$\\theta_S$ (-):", "thetaS", "0.4"),
+            make_input_row("$\\alpha$ (1/m):", "alpha", "0.5"),
+            make_input_row("$n$:", "n", "1.8"),
+            make_input_row("$K_S$ (m/d):", "KS", "0.2"),
+            dbc.Button("Update Plot", id="update-button", color="primary", className="mt-2")
+        ], width=3),
 
-    html.Div([
-    # Options for model run  
-    html.Label(" Lower boundary condition: "),
-    dcc.Dropdown(
-        id='lowerBC',
-        options=optionsLBC,
-        value=defaultvalueLBC,
-        style={'width': '300px'}),
+        dbc.Col([
+            dcc.Graph(id='hyd-plot',mathjax=True)
+        ], width=9)
+    ], className="mb-5"),
 
-    html.Label(" Initial condition: "),
-    dcc.Dropdown(
-        id='IC',
-        options=optionsIC,
-        value=defaultvalueIC,
-        style={'width': '300px'}),
-    html.Br(),
-    html.Br(),
+    html.H4("Run openRE"),
 
-    dcc.Input(
-        id='tI', 
-        type='text', 
-        value='0, 10,1000', 
-        style={'width': '150px'}
-    ),
-    html.Label(" Times for infiltration pulses (d): "),
+    dbc.Row([
+        dbc.Col([
+            dbc.Label("Lower boundary condition:"),
+            dcc.Dropdown(id='lowerBC', options=optionsLBC, value=defaultvalueLBC),
 
-    html.Br(),
-    dcc.Input(
-        id='Ipulses', 
-        type='text', 
-        value='0.05, 0.05', 
-        style={'width': '150px'}
-    ),
-    html.Label(" Infiltration pulses (m/d): "),
-    
-    ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+            dbc.Label("Initial condition:"),
+            dcc.Dropdown(id='IC', options=optionsIC, value=defaultvalueIC),
 
-    html.Div([    
-    # Text boxes for model run
-    html.Br(),
-    dcc.Input(
-        id='RunTime', 
-        type='text', 
-        value='10', 
-        style={'width': '75px'}
-    ),
-    html.Label(" Runtime (d): "),
+            make_input_row("Times for infiltration pulses (d):", "tI", "0, 10,1000"),
+            make_input_row("Infiltration pulses (m/d):", "Ipulses", "0.05, 0.05")
+        ], width=6),
 
-    html.Br(),
-    dcc.Input(
-        id='TimeStep', 
-        type='text', 
-        value='0.25', 
-        style={'width': '75px'}
-    ),
-    html.Label(" Time step (d): "),
-    
-    html.Br(),
-    dcc.Input(
-        id='SoilDepth', 
-        type='text', 
-        value='4', 
-        style={'width': '75px'}
-    ),
-    html.Label(" Soil depth (m): "),
-
-    html.Br(),
-    dcc.Input(
-        id='SpaceStep', 
-        type='text', 
-        value='0.1', 
-        style={'width': '75px'}
-    ),
-    html.Label(" Space step (m): "),
-
-    html.Br(),
-    dcc.Input(
-        id='psi_ini', 
-        type='text', 
-        value='0.', 
-        style={'width': '75px'}
-    ),
-    html.Label(" Lower/initial matric potential (m): "),
-
-    html.Br(),
-    html.Br(),
-    html.Button('Run openRE', id='runRE-button', n_clicks=0),
-    ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-
-    html.Div([    
-    # Run model and plot output
-    dcc.Graph(id='REplot', style={'display': 'none'})
+        dbc.Col([
+            make_input_row("Runtime (d):", "RunTime", "10"),
+            make_input_row("Time step (d):", "TimeStep", "0.25"),
+            make_input_row("Soil depth (m):", "SoilDepth", "4"),
+            make_input_row("Space step (m):", "SpaceStep", "0.1"),
+            make_input_row("Lower/initial matric potential (m):", "psi_ini", "0."),
+            dbc.Button("Run openRE", id="runRE-button", color="success", className="mt-2")
+        ], width=6)
     ]),
-    ]),
-    
-    html.Footer("Andrew Ireson", style={'textAlign': 'right', 'padding': '10px', 'marginTop': '20px'})
-    
-], style={'padding': '20px'})
+
+    dcc.Graph(id='REplot', style={'display': 'none'}, mathjax=True),
+
+    html.Footer("Andrew Ireson", style={'textAlign': 'center', 'padding': '10px', 'marginTop': '20px'})
+], fluid=True)
+
 
 @app.callback(
     Output('hyd-plot', 'figure'),
-    [Input('update-button', 'n_clicks')],
-    [State('psi_min', 'value'),
-     State('psi_max', 'value'),
-     State('thetaR', 'value'),
-     State('thetaS', 'value'),
-     State('alpha', 'value'),
-     State('n', 'value'),
-     State('KS', 'value')]
+    Input('update-button', 'n_clicks'),
+    State('psi_min', 'value'),
+    State('psi_max', 'value'),
+    State('thetaR', 'value'),
+    State('thetaS', 'value'),
+    State('alpha', 'value'),
+    State('n', 'value'),
+    State('KS', 'value')
 )
-def update_graph(n_clicks, psi_min,psi_max,thetaR, thetaS,alpha,n,KS):
+def update_graph(n_clicks, psi_min, psi_max, thetaR, thetaS, alpha, n, KS):
     psi_min = float(psi_min)
     psi_max = float(psi_max)
     thetaR = float(thetaR)
@@ -328,83 +120,73 @@ def update_graph(n_clicks, psi_min,psi_max,thetaR, thetaS,alpha,n,KS):
     n = float(n)
     KS = float(KS)
 
-    psi,theta,C,K=HydProps(psi_min,psi_max,thetaR, thetaS,alpha,n,KS)
+    psi, theta, C, K = HydProps(psi_min, psi_max, thetaR, thetaS, alpha, n, KS)
 
-    # Create a figure with 3 subplots
-    fig = make_subplots(rows=1, cols=3, subplot_titles=("theta-psi", "C-psi", "K-psi"))
+    fig = make_subplots(
+    rows=1, cols=3,
+    subplot_titles=(r"$\theta(\psi)$", r"$C(\psi)$", r"$K(\psi)$")
+    )
 
-    # Add each plot to the figure
-    fig.add_trace(go.Scatter(x=psi, y=theta, mode='lines', name='sin(x)', line=dict(color='blue')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=psi, y=C, mode='lines', name='cos(x)', line=dict(color='red')), row=1, col=2)
-    fig.add_trace(go.Scatter(x=psi, y=K, mode='lines', name='tan(x)', line=dict(color='green')), row=1, col=3)
+    fig.add_trace(go.Scatter(x=psi, y=theta, mode='lines', line=dict(color='blue')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=psi, y=C, mode='lines', line=dict(color='red')), row=1, col=2)
+    fig.add_trace(go.Scatter(x=psi, y=K, mode='lines', line=dict(color='green')), row=1, col=3)
 
-    # Update layout
-    fig.update_layout(showlegend=False,margin=dict(l=0, r=0, t=0, b=0))
-
-    # Axes labels
-    fig.update_xaxes(title_text='psi', row=1, col=1)
-    fig.update_yaxes(title_text='theta', row=1, col=1)
-    fig.update_xaxes(title_text='psi', row=1, col=2)
-    fig.update_yaxes(title_text='C', row=1, col=2)
-    fig.update_xaxes(title_text='psi', row=1, col=3)
-    fig.update_yaxes(title_text='K', row=1, col=3)
+    fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10))
+    fig.update_xaxes(title_text=r'$\psi$', row=1, col=1)
+    fig.update_yaxes(title_text=r'$\theta$', row=1, col=1)
+    fig.update_xaxes(title_text=r'$\psi$', row=1, col=2)
+    fig.update_yaxes(title_text=r'$C$', row=1, col=2)
+    fig.update_xaxes(title_text=r'$\psi$', row=1, col=3)
+    fig.update_yaxes(title_text=r'$K$', row=1, col=3)
 
     return fig
 
+
 @app.callback(
     Output('REplot', 'figure'),
-    Output('REplot', 'style'),  # Control the visibility
+    Output('REplot', 'style'),
     Input('runRE-button', 'n_clicks'),
-    [State('RunTime', 'value'),
-     State('TimeStep', 'value'),
-     State('SoilDepth', 'value'),
-     State('SpaceStep', 'value'),
-     State('tI', 'value'),
-     State('Ipulses', 'value'),
-     State('psi_ini', 'value'),
-     State('lowerBC', 'value'),
-     State('IC', 'value')]
+    State('RunTime', 'value'),
+    State('TimeStep', 'value'),
+    State('SoilDepth', 'value'),
+    State('SpaceStep', 'value'),
+    State('tI', 'value'),
+    State('Ipulses', 'value'),
+    State('psi_ini', 'value'),
+    State('lowerBC', 'value'),
+    State('IC', 'value')
 )
-def update_graph2(n_clicks,RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_ini,lowerBC,IC):
-    global pars
-    if n_clicks > 0:
-        # Generate random data for the second graph
-        t,z,psi,WB=runRE(RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_ini,lowerBC,IC)
+def update_graph2(n_clicks, RunTime, TimeStep, SoilDepth, SpaceStep, tI, Ipulses, psi_ini, lowerBC, IC):
+    if n_clicks is None:
+        return {}, {'display': 'none'}
+    t, z, psi, WB = runRE(RunTime, TimeStep, SoilDepth, SpaceStep, tI, Ipulses, psi_ini, lowerBC, IC)
+    dt = float(TimeStep)
 
-        dt=float(TimeStep)
-        
-        # Create the figure for the second graph
-        fig = make_subplots(rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=("Depth profile", "Time series"))
-        # fig = go.Figure()
-        for i in range(len(t)):
-            fig.add_trace(go.Scatter(x=psi[i,:], y=z, mode='lines', line=dict(color='blue')),row=1,col=1)
-            fig.add_trace(go.Scatter(x=psi[i,:]+float(SoilDepth)-z, y=z, mode='lines', line=dict(color='red')),row=1,col=1)
+    fig = make_subplots(rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=("Depth profile", "Time series"))
+    i=0
+    fig.add_trace(go.Scatter(x=psi[i, :], y=z, mode='lines', line=dict(color='blue'),name='Matric potential'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=psi[i, :] + float(SoilDepth) - z, y=z, mode='lines', line=dict(color='red'),name='Hydraulic head'), row=1, col=1)
+    for i in range(1,len(t)):
+        fig.add_trace(go.Scatter(x=psi[i, :], y=z, mode='lines', line=dict(color='blue'), showlegend=False), row=1, col=1)
+        fig.add_trace(go.Scatter(x=psi[i, :] + float(SoilDepth) - z, y=z, mode='lines', line=dict(color='red'), showlegend=False), row=1, col=1)
 
-        fig.add_trace(go.Scatter(x=WB.index, y=WB['S']-WB['S'].iloc[0], mode='lines'),row=1,col=2)
-        fig.add_trace(go.Scatter(x=WB.index, y=WB['QIN'].cumsum()*dt-WB['QOUT'].cumsum()*dt, mode='markers'),row=1,col=2)
-        fig.add_trace(go.Scatter(x=WB.index[1:], y=WB['QIN'].iloc[1:], mode='lines'),row=1,col=2)
-        fig.add_trace(go.Scatter(x=WB.index[1:], y=WB['QOUT'].iloc[1:], mode='lines'),row=1,col=2)
-        
-        # for i in range(len(z)):
-        #     fig.add_trace(go.Scatter(x=t, y=psi[:,i], mode='lines'),row=1,col=2)
-            
-        fig.update_layout(xaxis_title='X', yaxis_title='Y', 
-                            width=None,
-                            autosize=True,
-                            margin=dict(l=10, r=10, t=10, b=10),
-                            showlegend=False, yaxis=dict(range=[SoilDepth, 0]))
+    fig.add_trace(go.Scatter(x=WB.index, y=WB['S'] - WB['S'].iloc[0], mode='lines',name='Cum. change in storage'), row=1, col=2)
+    fig.add_trace(go.Scatter(x=WB.index, y=WB['QIN'].cumsum() * dt - WB['QOUT'].cumsum() * dt, mode='markers',name='Cum. net flux'), row=1, col=2)
+    fig.add_trace(go.Scatter(x=WB.index[1:], y=WB['QIN'].iloc[1:], mode='lines',name='Infiltration'), row=1, col=2)
+    fig.add_trace(go.Scatter(x=WB.index[1:], y=WB['QOUT'].iloc[1:], mode='lines',name='Drainage'), row=1, col=2)
 
-         # Axes labels
-        fig.update_xaxes(title_text='psi (m)', row=1, col=1)
-        fig.update_yaxes(title_text='depth (m)', row=1, col=1)
-        fig.update_xaxes(title_text='time (d)', row=1, col=2)
-        fig.update_yaxes(title_text='Water balance', row=1, col=2)
-        
-        
-        return fig, {'display': 'block'}  # Show the graph
-    else:
-        return {}, {'display': 'none'}  # Keep it hidden
+    fig.update_layout(xaxis_title='X', yaxis_title='Y', autosize=True,
+                      margin=dict(l=10, r=10, t=10, b=10), 
+                      yaxis=dict(range=[SoilDepth, 0]),
+                      legend=dict(x=0.4,y=0.01,bordercolor="Black",  borderwidth=1)
+)
 
-# Run app
+    fig.update_xaxes(title_text='psi (m)', row=1, col=1)
+    fig.update_yaxes(title_text='depth (m)', row=1, col=1)
+    fig.update_xaxes(title_text='time (d)', row=1, col=2)
+    fig.update_yaxes(title_text='Water balance', row=1, col=2)
+
+    return fig, {'display': 'block'}
+
 if __name__ == '__main__':
-    app.run_server(debug=True,host="0.0.0.0")
+    app.run(debug=True, host="0.0.0.0")
