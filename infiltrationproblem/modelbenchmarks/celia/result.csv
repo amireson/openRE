@@ -1,2 +1,2 @@
 Q approx, Runtime (s), psiRMSE (m), MB err (mm), MB RMSE (mm), QIN (mm), QOUT (mm), dS (mm)
-central, 2.954, 0.000, 0.000, 2.321e-10, 4844.32 4849.37, -5.05
+central, 0.197, 0.000, 0.000, 7.856e-08, 4844.32 4837.77, 6.54

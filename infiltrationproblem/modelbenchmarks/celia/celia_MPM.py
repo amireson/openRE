@@ -74,8 +74,8 @@ def Rfun(psiiter,psiin,qT,KB,C,Kmid,dtheta,dt,dz,n):
 
     x1=dtheta/dt*dz
     x2=-(Kmid[1:]-Kmid[:-1])
-    x3=-Kmid[1:]*(psigrid[2:]-psigrid[1:-1])
-    x4=Kmid[:-1]*(psigrid[1:-1]-psigrid[:-2])
+    x3=-Kmid[1:]*(psigrid[2:]-psigrid[1:-1])/dz
+    x4=Kmid[:-1]*(psigrid[1:-1]-psigrid[:-2])/dz
 
     # Lower boundary:
     x2[0]=-Kmid[1]
