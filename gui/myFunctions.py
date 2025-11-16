@@ -7,7 +7,7 @@ from Richards_ZF import run_RE as run_RE_ZF
 
 def HydProps(psi_min,psi_max,thetaR, thetaS,alpha,n,KS):
     global pars
-    psi=np.linspace(psi_min,psi_max)
+    psi=np.linspace(psi_min,psi_max,301)
     pars={}
     pars['thetaR']=thetaR
     pars['thetaS']=thetaS
@@ -95,5 +95,6 @@ def runRE(RunTime,TimeStep,SoilDepth,SpaceStep,tI,Ipulses,psi_ini,lowerBC,IC):
         psi,WB,runtime=run_RE_FP(dt,t,dz,zN,n,psi0,BC_T,BC_B,pars)
     elif lowerBC=='ZF':    
         psi,WB,runtime=run_RE_ZF(dt,t,dz,zN,n,psi0,BC_T,BC_B,pars)
-        
-    return t,z,psi,WB
+
+    theta=thetaFun(psi,pars)    
+    return t,z,psi,WB,theta
